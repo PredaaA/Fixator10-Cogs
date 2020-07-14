@@ -11,7 +11,7 @@ import textwrap
 import time
 from asyncio import TimeoutError
 from copy import copy
-from datetime import timedelta
+from datetime import datetime, timedelta
 from tabulate import tabulate
 from io import BytesIO
 from typing import Union
@@ -3480,6 +3480,44 @@ class Leveler(commands.Cog):
                         await channel.send(
                             "**{} just gained a level{}!**".format(name, server_identifier), file=file,
                         )
+
+    async def get_image(self, image_type: str, user: discord.User, server: discord.Guild):
+        data = {
+            "user": {"id": user.id, "avatar": str(user.avatar_url_as(format="png"))},
+            "server": {"id": server.id},
+            "config": {},
+        }
+        if image_type == "profile":
+            data["user"]["bank_balance"] = await bank.get_balance(user)
+            data["user"]["truncate_name"] = self._truncate_text(self._name(user, 22), 22)
+            data["user"]["global_rank"] = await self._find_global_rank(user)
+            data["server"]["rank"] = await self._find_server_rank(user, server)
+            data["server"]["exp"] = await self._find_server_exp(user, server)
+            data["config"]["badge_type"] = await self.config.badge_type()
+        elif image_type == "rank":
+            data["user"]["bank_balance"] = await bank.get_balance(user)
+            data["user"]["truncate_name"] = self._truncate_text(self._name(user, 20), 20)
+            data["server"]["rank"] = await self._find_server_rank(user, server)
+            data["server"]["exp"] = await self._find_server_exp(user, server)
+            data["server"]["icon"] = str(server.icon_url_as(format="png", size=256))
+        headers = {"Authorization": "nope"}
+        try:
+            async with self.session.get(
+                "http://173.41.0.3:6712/getimage", json=data, headers=headers, params={"image_type": image_type},
+            ) as resp:
+                # try:
+                #     print(resp.status, await resp.json())
+                # except Exception:
+                #     print(resp.status, await resp.read())
+                if resp.status != 201:
+                    return None
+                file = discord.File(
+                    BytesIO(await resp.read()),
+                    f"{image_type}_{user.id}_{server.id}_{int(datetime.now().timestamp())}.png",
+                )
+            return file
+        except aiohttp.ClientConnectionError:
+            return None
 
     async def _find_server_rank(self, user, server):
         if not self._db_ready:
