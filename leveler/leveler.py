@@ -3488,27 +3488,23 @@ class Leveler(commands.Cog):
             "config": {},
         }
         if image_type == "profile":
-            data["user"]["bank_balance"] = await bank.get_balance(user)
+            data["user"]["bank_balance"] = self._truncate_text(f"${await bank.get_balance(user)}", 18)
             data["user"]["truncate_name"] = self._truncate_text(self._name(user, 22), 22)
-            data["user"]["global_rank"] = await self._find_global_rank(user)
-            data["server"]["rank"] = await self._find_server_rank(user, server)
-            data["server"]["exp"] = await self._find_server_exp(user, server)
+            data["user"]["global_rank"] = self._truncate_text(f"#{await self._find_global_rank(user) or '1000+'}", 8)
+            data["server"]["rank"] = self._truncate_text(f"#{await self._find_server_rank(user, server)}", 8)
+            data["server"]["exp"] = self._truncate_text(str(await self._find_server_exp(user, server)), 8)
             data["config"]["badge_type"] = await self.config.badge_type()
         elif image_type == "rank":
-            data["user"]["bank_balance"] = await bank.get_balance(user)
+            data["user"]["bank_balance"] = self._truncate_text(f"${await bank.get_balance(user)}", 12)
             data["user"]["truncate_name"] = self._truncate_text(self._name(user, 20), 20)
-            data["server"]["rank"] = await self._find_server_rank(user, server)
-            data["server"]["exp"] = await self._find_server_exp(user, server)
+            data["server"]["rank"] = self._truncate_text(str(await self._find_server_rank(user, server)), 12)
+            data["server"]["exp"] = self._truncate_text(str(await self._find_server_exp(user, server)), 12)
             data["server"]["icon"] = str(server.icon_url_as(format="png", size=256))
         headers = {"Authorization": "nope"}
         try:
             async with self.session.get(
                 "http://173.41.0.3:6712/getimage", json=data, headers=headers, params={"image_type": image_type},
             ) as resp:
-                # try:
-                #     print(resp.status, await resp.json())
-                # except Exception:
-                #     print(resp.status, await resp.read())
                 if resp.status != 201:
                     return None
                 file = discord.File(
