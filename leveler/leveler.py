@@ -59,6 +59,7 @@ class Leveler(commands.Cog):
             "password": None,
             "db_name": "leveler",
         }
+        default_api = {"toggled": False, "host": "localhost", "port": "6712"}
         default_global = {
             "bg_price": 0,
             "badge_type": "circles",
@@ -81,11 +82,14 @@ class Leveler(commands.Cog):
             "ignored_channels": [],
         }
         self.config.init_custom("MONGODB", -1)
+        self.config.init_custom("IMGENAPI", -1)
         self.config.register_custom("MONGODB", **default_mongodb)
+        self.config.register_custom("IMGENAPI", **default_api)
         self.config.register_global(**default_global)
         self.config.register_guild(**default_guild)
 
         self._db_ready = False
+        self._imgen_api_ready = False
         self.client = None
         self.db = None
         self.session = aiohttp.ClientSession(loop=self.bot.loop)
@@ -95,6 +99,7 @@ class Leveler(commands.Cog):
 
     async def initialize(self):
         await self._connect_to_mongo()
+        await self._check_imgen_api()
 
     async def _connect_to_mongo(self):
         if self._db_ready:
@@ -123,6 +128,24 @@ class Leveler(commands.Cog):
     def _disconnect_mongo(self):
         if self.client:
             self.client.close()
+
+    async def _check_imgen_api(self):
+        config = await self.config.custom("IMGENAPI").all()
+        if not config["toggled"]:
+            return True
+
+        try:
+            resp = await self.session.get(f"http://{config['host']}:{config['port']}")
+            if resp.status != 200:
+                log.error("Can't connect to the imgen API.\nPlease make sure that you have set the good settings.")
+                self._imgen_api_ready = False
+            self._imgen_api_ready = True
+        except aiohttp.ClientConnectionError as exc:
+            log.exception(
+                "Can't connect to the imgen API.\nPlease make sure that you have set the good settings.", exc_info=exc,
+            )
+            self._imgen_api_ready = False
+        return self._imgen_api_ready
 
     async def cog_check(self, ctx):
         if (ctx.command.parent is self.levelerset) or ctx.command is self.levelerset:
@@ -2405,6 +2428,15 @@ class Leveler(commands.Cog):
     async def draw_profile(self, user, server):
         if not self._db_ready:
             return
+
+        api_config = await self.config.custom("IMGENAPI").all()
+        if api_config["toggled"]:
+            image_object = await self.get_image_from_api("profile", user, server)
+            if image_object:
+                return discord.File(
+                    image_object, f"profile_{user.id}_{server.id}_{int(datetime.now().timestamp())}.png"
+                )
+
         font_file = f"{bundled_data_path(self)}/font.ttf"
         font_bold_file = f"{bundled_data_path(self)}/font_bold.ttf"
         font_unicode_file = f"{bundled_data_path(self)}/unicode.ttf"
@@ -2742,7 +2774,7 @@ class Leveler(commands.Cog):
                     if await self._valid_image_url(bg_color):
                         # get image
                         async with self.session.get(bg_color) as r:
-                            badge_image = Image.open(await r.read()).convert("RGBA")
+                            badge_image = Image.open(BytesIO(await r.read())).convert("RGBA")
                         badge_image = badge_image.resize((raw_length, raw_length), Image.ANTIALIAS)
 
                         # structured like this because if border = 0, still leaves outline.
@@ -2786,7 +2818,7 @@ class Leveler(commands.Cog):
                 # determine image or color for badge bg
                 if await self._valid_image_url(bg_color):
                     async with self.session.get(bg_color) as r:
-                        badge_image = Image.open(await r.read()).convert("RGBA")
+                        badge_image = Image.open(BytesIO(await r.read())).convert("RGBA")
 
                     if border_color is not None:
                         draw.rectangle(
@@ -2811,10 +2843,7 @@ class Leveler(commands.Cog):
         result = Image.alpha_composite(result, process)
         result.save(image_object, format="PNG")
         image_object.seek(0)
-        return discord.File(
-            image_object,
-            f"profile_{user.id}_{server.id}_{int(datetime.now().timestamp())}.png"
-        )
+        return discord.File(image_object, f"profile_{user.id}_{server.id}_{int(datetime.now().timestamp())}.png")
 
     # returns color that contrasts better in background
     def _contrast(self, bg_color, color1, color2):
@@ -2872,6 +2901,15 @@ class Leveler(commands.Cog):
         return back
 
     async def draw_rank(self, user, server):
+        if not self._db_ready:
+            return
+
+        api_config = await self.config.custom("IMGENAPI").all()
+        if api_config["toggled"]:
+            image_object = await self.get_image_from_api("rank", user, server)
+            if image_object:
+                return discord.File(image_object, f"rank_{user.id}_{server.id}_{int(datetime.now().timestamp())}.png")
+
         # fonts
         # font_file = f"{bundled_data_path(self)}/font.ttf"
         font_bold_file = f"{bundled_data_path(self)}/font_bold.ttf"
@@ -3114,10 +3152,7 @@ class Leveler(commands.Cog):
         result = Image.alpha_composite(result, process)
         result.save(image_object, format="PNG")
         image_object.seek(0)
-        return discord.File(
-            image_object,
-            f"rank_{user.id}_{server.id}_{int(datetime.now().timestamp())}.png"
-        )
+        return discord.File(image_object, f"rank_{user.id}_{server.id}_{int(datetime.now().timestamp())}.png")
 
     @staticmethod
     def _add_corners(im, rad, multiplier=6):
@@ -3139,6 +3174,13 @@ class Leveler(commands.Cog):
     async def draw_levelup(self, user, server):
         if not self._db_ready:
             return
+
+        api_config = await self.config.custom("IMGENAPI").all()
+        if api_config["toggled"]:
+            image_object = await self.get_image_from_api("levelup", user, server)
+            if image_object:
+                return discord.File(image_object, f"levelup_{user.id}_{server.id}_{int(datetime.now().timestamp())}.png")
+
         font_bold_file = f"{bundled_data_path(self)}/font_bold.ttf"
         userinfo = await self.db.users.find_one({"user_id": str(user.id)})
         # get urls
@@ -3243,10 +3285,7 @@ class Leveler(commands.Cog):
         result = Image.alpha_composite(result, process)
         result.save(image_object, format="PNG")
         image_object.seek(0)
-        return discord.File(
-            image_object,
-            f"levelup_{user.id}_{server.id}_{int(datetime.now().timestamp())}.png"
-        )
+        return discord.File(image_object, f"levelup_{user.id}_{server.id}_{int(datetime.now().timestamp())}.png")
 
     @commands.Cog.listener("on_message_without_command")
     async def _handle_on_message(self, message):
@@ -3462,7 +3501,7 @@ class Leveler(commands.Cog):
                             "**{} just gained a level{}!**".format(name, server_identifier), file=file,
                         )
 
-    async def get_image(self, image_type: str, user: discord.User, server: discord.Guild):
+    async def get_image_from_api(self, image_type: str, user: discord.User, server: discord.Guild):
         data = {
             "user": {"id": user.id, "avatar": str(user.avatar_url_as(format="png"))},
             "server": {"id": server.id},
@@ -3481,20 +3520,22 @@ class Leveler(commands.Cog):
             data["server"]["rank"] = self._truncate_text(str(await self._find_server_rank(user, server)), 12)
             data["server"]["exp"] = self._truncate_text(str(await self._find_server_exp(user, server)), 12)
             data["server"]["icon"] = str(server.icon_url_as(format="png", size=256))
-        headers = {"Authorization": "nope"}
         try:
+            config = await self.config.custom("IMGENAPI").all()
+            token = (await self.bot.get_shared_api_tokens("levelerapi")).get("api_key")
             async with self.session.get(
-                "http://173.41.0.3:6712/getimage", json=data, headers=headers, params={"image_type": image_type},
+                f"http://{config['host']}:{config['port']}/getimage",
+                headers={"Authorization": token},
+                params={"image_type": image_type},
+                json=data,
             ) as resp:
                 if resp.status != 201:
+                    log.error("Failed to fetch an image from imgen API: %s", resp.status)
                     return None
                 data = BytesIO(await resp.read())
-                # file = discord.File(
-                #     BytesIO(await resp.read()),
-                #     f"{image_type}_{user.id}_{server.id}_{int(datetime.now().timestamp())}.png",
-                # )
             return data
-        except aiohttp.ClientConnectionError:
+        except aiohttp.ClientConnectionError as exc:
+            log.exception("Failed to fetch an image from imgen API: ", exc_info=exc)
             return None
 
     async def _find_server_rank(self, user, server):
